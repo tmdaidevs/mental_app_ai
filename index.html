@@ -9,14 +9,16 @@
 <body>
 <div class="container">
     <h1>Document Graph Visualizer</h1>
-    <p>Select one or more text files to generate a similarity graph.</p>
+    <p>Select one or more text or PDF files to generate a knowledge graph.</p>
     <div class="controls">
-        <input type="file" id="files" multiple accept="text/plain">
+        <input type="file" id="files" multiple accept=".txt,application/pdf">
+        <input type="password" id="apiKey" placeholder="OpenAI API Key">
         <button id="generate">Generate Graph</button>
     </div>
     <div id="graph"></div>
 </div>
 <script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
 <script src="script.js"></script>
 </body>
 </html>

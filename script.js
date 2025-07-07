@@ -1,7 +1,33 @@
+function readFile(file) {
+    if (file.type === 'application/pdf') {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const typedarray = new Uint8Array(e.target.result);
+                pdfjsLib.getDocument(typedarray).promise.then(pdf => {
+                    const pages = [];
+                    const promises = [];
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        promises.push(pdf.getPage(i).then(page => {
+                            return page.getTextContent().then(tc => {
+                                const text = tc.items.map(item => item.str).join(' ');
+                                pages.push(text);
+                            });
+                        }));
+                    }
+                    Promise.all(promises).then(() => {
+                        resolve({name: file.name, text: pages.join(' ')});
+                    });
+                });
+            };
+            reader.readAsArrayBuffer(file);
+        });
+    }
+    return file.text().then(text => ({name: file.name, text}));
+}
+
 function readFiles(files) {
-    return Promise.all(Array.from(files).map(file => {
-        return file.text().then(text => ({name: file.name, text}));
-    }));
+    return Promise.all(Array.from(files).map(readFile));
 }
 
 function tokenize(text) {
@@ -60,18 +86,54 @@ function cosineSimilarity(a, b) {
     return dot(a, b) / (norm(a) * norm(b) || 1);
 }
 
-function buildGraph(docs, threshold=0.1) {
-    const nodes = docs.map((d, i) => ({id: i, name: d.name}));
+function buildGraph(docs) {
+    const nodes = [];
     const links = [];
-    for (let i = 0; i < docs.length; i++) {
-        for (let j = i+1; j < docs.length; j++) {
-            const sim = cosineSimilarity(docs[i].vector, docs[j].vector);
-            if (sim > threshold) {
-                links.push({source: i, target: j, value: sim});
+    const catIndex = new Map();
+
+    docs.forEach((doc, idx) => {
+        nodes.push({id: `doc-${idx}`, name: doc.name, type: 'doc'});
+        doc.categories.forEach(cat => {
+            if (!catIndex.has(cat)) {
+                const id = `cat-${catIndex.size}`;
+                catIndex.set(cat, id);
+                nodes.push({id, name: cat, type: 'category'});
             }
+            links.push({source: `doc-${idx}`, target: catIndex.get(cat), value: 1});
+        });
+    });
+
+    return {nodes, links};
+}
+
+async function categorizeDocuments(docs, apiKey) {
+    const system = "You extract relevant categories from the provided document and" +
+                   " return them as a JSON array of short category names.";
+    for (const doc of docs) {
+        const text = doc.text.slice(0, 2000);
+        const body = {
+            model: "gpt-3.5-turbo",
+            messages: [
+                {role: "system", content: system},
+                {role: "user", content: text}
+            ],
+            temperature: 0.2
+        };
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify(body)
+        });
+        const data = await resp.json();
+        try {
+            doc.categories = JSON.parse(data.choices[0].message.content);
+        } catch (e) {
+            doc.categories = [];
         }
     }
-    return {nodes, links};
 }
 
 function render(graph) {
@@ -98,7 +160,7 @@ function render(graph) {
         .data(graph.nodes)
         .enter().append('circle')
         .attr('r', 8)
-        .attr('fill', 'steelblue')
+        .attr('fill', d => d.type === 'category' ? '#28a745' : '#007bff')
         .call(d3.drag()
             .on('start', dragstarted)
             .on('drag', dragged)
@@ -110,7 +172,8 @@ function render(graph) {
         .enter().append('text')
         .text(d => d.name)
         .attr('x', 12)
-        .attr('y', 3);
+        .attr('y', 3)
+        .style('font-size', '12px');
 
     simulation.on('tick', () => {
         link
@@ -148,9 +211,13 @@ function render(graph) {
 
 function generate() {
     const files = document.getElementById('files').files;
-    if (!files.length) return;
-    readFiles(files).then(docs => {
-        computeTfIdf(docs);
+    const apiKey = document.getElementById('apiKey').value.trim();
+    if (!files.length || !apiKey) {
+        alert('Please select files and provide an OpenAI API key.');
+        return;
+    }
+    readFiles(files).then(async docs => {
+        await categorizeDocuments(docs, apiKey);
         const graph = buildGraph(docs);
         document.getElementById('graph').innerHTML = '';
         render(graph);
