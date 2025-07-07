@@ -4,12 +4,12 @@ This repository provides a simple web application that lets you visualize text d
 
 ## Running locally
 
-Open `docs/index.html` in your web browser. Select one or more text files and click **Generate Graph** to see how they relate.
+Open `index.html` in your web browser. Select one or more text files and click **Generate Graph** to see how they relate.
 
 ## Deploying on GitHub Pages
 
 1. Push this repository to GitHub.
-2. In the repository settings, enable **GitHub Pages** and choose the `main` branch with the `/docs` folder.
+2. In the repository settings, enable **GitHub Pages** and choose the `main` branch with the `/` root folder.
 3. After a minute, your site will be available at `https://<your-username>.github.io/<repository>/`.
 
 The site is completely static and only uses client-side JavaScript, so it works out of the box with GitHub Pages.
