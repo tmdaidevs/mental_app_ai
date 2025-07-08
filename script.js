@@ -1,3 +1,6 @@
+const APP_VERSION = '1.0.0';
+document.getElementById('version').textContent = `Version ${APP_VERSION}`;
+
 function readFile(file) {
     if (file.type === 'application/pdf') {
         return new Promise((resolve, reject) => {
