@@ -1,5 +1,10 @@
 const APP_VERSION = '1.0.0';
-document.getElementById('version').textContent = `Version ${APP_VERSION}`;
+if (typeof document !== 'undefined') {
+    document.getElementById('version').textContent = `Version ${APP_VERSION}`;
+}
+
+let currentDocs = [];
+let currentGraphElements = null;
 
 function readFile(file) {
     if (file.type === 'application/pdf') {
@@ -89,22 +94,102 @@ function cosineSimilarity(a, b) {
     return dot(a, b) / (norm(a) * norm(b) || 1);
 }
 
+function updateStatus(text) {
+    document.getElementById('status').textContent = text;
+}
+
+function updateCategoryFilter(docs) {
+    const select = document.getElementById('categoryFilter');
+    const cats = new Set();
+    docs.forEach(d => d.categories.forEach(c => cats.add(c)));
+    select.innerHTML = '<option value="">All Categories</option>';
+    cats.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c;
+        select.appendChild(opt);
+    });
+}
+
+function filterGraph() {
+    if (!currentGraphElements) return;
+    const query = document.getElementById('search').value.toLowerCase();
+    const cat = document.getElementById('categoryFilter').value;
+    currentGraphElements.node.style('opacity', d => {
+        if (d.type === 'doc') {
+            let ok = true;
+            if (query && !currentDocs[d.index].text.toLowerCase().includes(query) &&
+                !d.name.toLowerCase().includes(query)) ok = false;
+            if (cat && !d.categories.includes(cat)) ok = false;
+            return ok ? 1 : 0.1;
+        }
+        if (d.type === 'category') {
+            return cat && d.name !== cat ? 0.1 : 1;
+        }
+        return 1;
+    });
+    currentGraphElements.label.style('opacity', (_, i, nodes) => {
+        const d = d3.select(nodes[i]).datum();
+        if (d.type === 'doc') {
+            let ok = true;
+            if (query && !currentDocs[d.index].text.toLowerCase().includes(query) &&
+                !d.name.toLowerCase().includes(query)) ok = false;
+            if (cat && !d.categories.includes(cat)) ok = false;
+            return ok ? 1 : 0.1;
+        }
+        if (d.type === 'category') {
+            return cat && d.name !== cat ? 0.1 : 1;
+        }
+        return 1;
+    });
+    currentGraphElements.link.style('opacity', l => {
+        if (cat) {
+            if (l.type === 'category') {
+                return l.target.name === cat ? 1 : 0.1;
+            }
+            if (l.type === 'similarity') {
+                const sourceOk = l.source.categories && l.source.categories.includes(cat);
+                const targetOk = l.target.categories && l.target.categories.includes(cat);
+                return sourceOk || targetOk ? 1 : 0.1;
+            }
+        }
+        if (query) {
+            const sourceText = l.source.text || (l.source.index !== undefined ? currentDocs[l.source.index].text : '');
+            const targetText = l.target.text || (l.target.index !== undefined ? currentDocs[l.target.index].text : '');
+            const sourceMatch = sourceText.toLowerCase().includes(query);
+            const targetMatch = targetText.toLowerCase().includes(query);
+            if (!sourceMatch && !targetMatch) return 0.1;
+        }
+        return 1;
+    });
+}
+
 function buildGraph(docs) {
+    computeTfIdf(docs);
     const nodes = [];
     const links = [];
     const catIndex = new Map();
 
     docs.forEach((doc, idx) => {
-        nodes.push({id: `doc-${idx}`, name: doc.name, type: 'doc', summary: doc.summary});
+        nodes.push({id: `doc-${idx}`, name: doc.name, type: 'doc', summary: doc.summary, categories: doc.categories, index: idx, text: doc.text});
         doc.categories.forEach(cat => {
             if (!catIndex.has(cat)) {
                 const id = `cat-${catIndex.size}`;
                 catIndex.set(cat, id);
                 nodes.push({id, name: cat, type: 'category'});
             }
-            links.push({source: `doc-${idx}`, target: catIndex.get(cat), value: 1});
+            links.push({source: `doc-${idx}`, target: catIndex.get(cat), value: 1, type: 'category'});
         });
     });
+
+    for (let i = 0; i < docs.length; i++) {
+        for (let j = i + 1; j < docs.length; j++) {
+            const sim = cosineSimilarity(docs[i].vector, docs[j].vector);
+            if (sim > 0.15) {
+                links.push({source: `doc-${i}`, target: `doc-${j}`, value: sim, type: 'similarity'});
+            }
+        }
+    }
 
     return {nodes, links};
 }
@@ -112,7 +197,9 @@ function buildGraph(docs) {
 async function categorizeDocuments(docs, apiKey) {
     const system = "You extract relevant categories from the provided document and" +
                    " return them as a JSON array of short category names.";
-    for (const doc of docs) {
+    for (let i = 0; i < docs.length; i++) {
+        const doc = docs[i];
+        updateStatus(`Categorizing ${doc.name} (${i + 1}/${docs.length})`);
         const text = doc.text.slice(0, 2000);
         const body = {
             model: "gpt-3.5-turbo",
@@ -141,7 +228,9 @@ async function categorizeDocuments(docs, apiKey) {
 
 async function summarizeDocuments(docs, apiKey) {
     const system = "You are a helpful assistant that summarizes a document in a few concise sentences.";
-    for (const doc of docs) {
+    for (let i = 0; i < docs.length; i++) {
+        const doc = docs[i];
+        updateStatus(`Summarizing ${doc.name} (${i + 1}/${docs.length})`);
         const text = doc.text.slice(0, 2000);
         const body = {
             model: "gpt-3.5-turbo",
@@ -220,6 +309,9 @@ function render(graph) {
             .attr('y', d => d.y);
     });
 
+    currentGraphElements = {node, link, label};
+    filterGraph();
+
     function dragstarted(event) {
         if (!event.active) simulation.alphaTarget(0.3).restart();
         event.subject.fx = event.subject.x;
@@ -251,13 +343,33 @@ function generate() {
         alert('Please select files and provide an OpenAI API key.');
         return;
     }
+    localStorage.setItem('apiKey', apiKey);
     readFiles(files).then(async docs => {
+        currentDocs = docs;
+        updateStatus('Categorizing documents...');
         await categorizeDocuments(docs, apiKey);
+        updateStatus('Summarizing documents...');
         await summarizeDocuments(docs, apiKey);
+        updateStatus('Building graph...');
         const graph = buildGraph(docs);
         document.getElementById('graph').innerHTML = '';
         render(graph);
+        updateCategoryFilter(docs);
+        updateStatus('');
     });
 }
 
-document.getElementById('generate').addEventListener('click', generate);
+if (typeof document !== 'undefined') {
+    document.getElementById('generate').addEventListener('click', generate);
+    document.getElementById('search').addEventListener('input', filterGraph);
+    document.getElementById('categoryFilter').addEventListener('change', filterGraph);
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const savedKey = localStorage.getItem('apiKey');
+        if (savedKey) document.getElementById('apiKey').value = savedKey;
+    });
+}
+
+if (typeof module !== 'undefined') {
+    module.exports = {tokenize, computeTfIdf, cosineSimilarity, buildGraph};
+}
