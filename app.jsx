@@ -78,12 +78,17 @@ function App() {
 
   const handleFile = async e => {
     const file = e.target.files[0];
-    if (!file || !apiKey) return;
+    if (!file) return;
     const text = await readPdfFile(file);
     setPdfText(text);
-    const sum = await summarize(text, apiKey);
-    setSummary(sum);
+    setSummary('');
     setHistory([]);
+  };
+
+  const generateSummary = async () => {
+    if (!pdfText || !apiKey) return;
+    const sum = await summarize(pdfText, apiKey);
+    setSummary(sum);
   };
 
   const sendQuestion = async () => {
@@ -106,7 +111,8 @@ function App() {
             value: apiKey,
             onChange: e => setApiKey(e.target.value)
           }),
-          React.createElement('input', { type: 'file', accept: 'application/pdf', onChange: handleFile })
+          React.createElement('input', { type: 'file', accept: 'application/pdf', onChange: handleFile }),
+          React.createElement('button', { onClick: generateSummary }, 'Summarize')
         ),
         React.createElement('div', { className: 'summary' },
           React.createElement('h3', null, 'Summary'),
