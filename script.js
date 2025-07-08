@@ -92,7 +92,7 @@ function buildGraph(docs) {
     const catIndex = new Map();
 
     docs.forEach((doc, idx) => {
-        nodes.push({id: `doc-${idx}`, name: doc.name, type: 'doc'});
+        nodes.push({id: `doc-${idx}`, name: doc.name, type: 'doc', summary: doc.summary});
         doc.categories.forEach(cat => {
             if (!catIndex.has(cat)) {
                 const id = `cat-${catIndex.size}`;
@@ -136,6 +136,31 @@ async function categorizeDocuments(docs, apiKey) {
     }
 }
 
+async function summarizeDocuments(docs, apiKey) {
+    const system = "You are a helpful assistant that summarizes a document in a few concise sentences.";
+    for (const doc of docs) {
+        const text = doc.text.slice(0, 2000);
+        const body = {
+            model: "gpt-3.5-turbo",
+            messages: [
+                {role: "system", content: system},
+                {role: "user", content: text}
+            ],
+            temperature: 0.3
+        };
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify(body)
+        });
+        const data = await resp.json();
+        doc.summary = (data.choices && data.choices[0].message.content.trim()) || '';
+    }
+}
+
 function render(graph) {
     const width = document.getElementById('graph').clientWidth;
     const height = document.getElementById('graph').clientHeight;
@@ -164,7 +189,8 @@ function render(graph) {
         .call(d3.drag()
             .on('start', dragstarted)
             .on('drag', dragged)
-            .on('end', dragended));
+            .on('end', dragended))
+        .on('click', clicked);
 
     const label = svg.append('g')
         .selectAll('text')
@@ -207,6 +233,12 @@ function render(graph) {
         event.subject.fx = null;
         event.subject.fy = null;
     }
+
+    function clicked(event, d) {
+        if (d.type === 'doc') {
+            document.getElementById('summary').innerHTML = `<h3>${d.name}</h3><p>${d.summary || ''}</p>`;
+        }
+    }
 }
 
 function generate() {
@@ -218,6 +250,7 @@ function generate() {
     }
     readFiles(files).then(async docs => {
         await categorizeDocuments(docs, apiKey);
+        await summarizeDocuments(docs, apiKey);
         const graph = buildGraph(docs);
         document.getElementById('graph').innerHTML = '';
         render(graph);
