@@ -25,6 +25,12 @@ function readPdfFile(file) {
   });
 }
 
+// configure pdf.js worker when running in the browser
+if (typeof pdfjsLib !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
+}
+
 async function summarize(text, apiKey) {
   const body = {
     model: 'gpt-3.5-turbo',
